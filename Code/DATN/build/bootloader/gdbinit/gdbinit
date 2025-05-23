@@ -1,0 +1,2 @@
+source C:/ESP32-PRJ/DATN/Code/DATN/build/bootloader/gdbinit/symbols
+source C:/ESP32-PRJ/DATN/Code/DATN/build/bootloader/gdbinit/connect

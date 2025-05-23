@@ -1,4 +1,4 @@
-#include "tilt_sensor.h"
+#include "sw520.h"
 #include "driver/gpio.h"
 
 static uint8_t tilt_pin;
