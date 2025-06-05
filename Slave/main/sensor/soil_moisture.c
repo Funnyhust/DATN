@@ -13,7 +13,7 @@ esp_err_t soil_moisture_init(soil_moisture_sensor_t *sensor, adc_channel_t adc_c
     sensor->dry_value = 4095;  // Giá trị mặc định khi đất khô
     sensor->wet_value = 0;     // Giá trị mặc định khi đất ướt
 
-    ESP_LOGI(TAG, "Soil moisture sensor initialized on ADC channel %d", adc_channel);
+    ESP_LOGI(TAG, "Soil moisture sensor initialized on ADC2 channel %d", adc_channel);
     return ESP_OK;
 }
 
@@ -23,25 +23,25 @@ esp_err_t soil_moisture_read_raw(soil_moisture_sensor_t *sensor, int *adc_value)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Khởi tạo ADC oneshot
-    adc_oneshot_unit_handle_t adc1_handle;
+    // Khởi tạo ADC2 oneshot
+    adc_oneshot_unit_handle_t adc2_handle;
     adc_oneshot_unit_init_cfg_t init_cfg = {
-        .unit_id = ADC_UNIT_1,
+        .unit_id = ADC_UNIT_2,
         .ulp_mode = ADC_ULP_MODE_DISABLE,
     };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_cfg, &adc1_handle));
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_cfg, &adc2_handle));
     adc_oneshot_chan_cfg_t chan_cfg = {
         .atten = ADC_ATTEN_DB_12,
         .bitwidth = ADC_BITWIDTH_12,
     };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, sensor->adc_channel, &chan_cfg));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc2_handle, sensor->adc_channel, &chan_cfg));
 
     // Đọc giá trị ADC
-    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, sensor->adc_channel, adc_value));
+    ESP_ERROR_CHECK(adc_oneshot_read(adc2_handle, sensor->adc_channel, adc_value));
     ESP_LOGI(TAG, "Soil moisture ADC raw value: %d", *adc_value);
 
     // Giải phóng ADC
-    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
+    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc2_handle));
     return ESP_OK;
 }
 
@@ -51,22 +51,22 @@ esp_err_t soil_moisture_read(soil_moisture_sensor_t *sensor, float *moisture_per
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Khởi tạo ADC oneshot
-    adc_oneshot_unit_handle_t adc1_handle;
+    // Khởi tạo ADC2 oneshot
+    adc_oneshot_unit_handle_t adc2_handle;
     adc_oneshot_unit_init_cfg_t init_cfg = {
-        .unit_id = ADC_UNIT_1,
+        .unit_id = ADC_UNIT_2,  // Đã sửa lại chỗ này
         .ulp_mode = ADC_ULP_MODE_DISABLE,
     };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_cfg, &adc1_handle));
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_cfg, &adc2_handle));
     adc_oneshot_chan_cfg_t chan_cfg = {
         .atten = ADC_ATTEN_DB_12,
         .bitwidth = ADC_BITWIDTH_12,
     };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, sensor->adc_channel, &chan_cfg));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc2_handle, sensor->adc_channel, &chan_cfg));
 
     // Đọc giá trị ADC
     int adc_value;
-    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, sensor->adc_channel, &adc_value));
+    ESP_ERROR_CHECK(adc_oneshot_read(adc2_handle, sensor->adc_channel, &adc_value));
 
     // Chuyển đổi thành phần trăm
     *moisture_percentage = ((float)(sensor->dry_value - adc_value) / (sensor->dry_value - sensor->wet_value)) * 100.0;
@@ -76,6 +76,6 @@ esp_err_t soil_moisture_read(soil_moisture_sensor_t *sensor, float *moisture_per
     ESP_LOGI(TAG, "Soil moisture: %.2f%% (ADC raw: %d)", *moisture_percentage, adc_value);
 
     // Giải phóng ADC
-    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
+    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc2_handle));
     return ESP_OK;
 }

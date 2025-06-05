@@ -66,12 +66,12 @@
 
 #define TIMEOUT_RESET                  100
 
-#define CONFIG_CS_GPIO      5   // Chip Select
-#define CONFIG_RST_GPIO     14   // Reset
-#define CONFIG_MISO_GPIO    19// SPI MISO
-#define CONFIG_MOSI_GPIO    18  // SPI MOSI
-#define CONFIG_SCK_GPIO     21  // SPI SCK
-#define CONFIG_DIO0_GPIO    2  // DIO0 interrupt
+#define CONFIG_CS_GPIO      13   // Chip Select
+#define CONFIG_RST_GPIO     18// Reset
+#define CONFIG_MISO_GPIO    1  // SPI MISO
+#define CONFIG_MOSI_GPIO    14  // SPI MOSI
+#define CONFIG_SCK_GPIO     12  // SPI SCK
+#define CONFIG_DIO0_GPIO    44 // DIO0 interrupt
 #define CONFIG_LORA_FREQUENCY 433000000 // 433 MHz
 #define CONFIG_LORA_CRC     1   // Enable CRC
 
@@ -97,7 +97,6 @@ lora_write_reg(int reg, int val)
       .tx_buffer = out,
       .rx_buffer = in  
    };
-
    gpio_set_level(CONFIG_CS_GPIO, 0);
    spi_device_transmit(__spi, &t);
    gpio_set_level(CONFIG_CS_GPIO, 1);
