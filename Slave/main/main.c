@@ -80,19 +80,22 @@ static bool send_packet_with_ack(Packet* pkt, int retries) {
                  pkt->node_id, pkt->sequence, pkt->soil_moisture, pkt->tilt_status, pkt->battery_level, pkt->count);
 
         uint64_t start_us = esp_timer_get_time();
-        while ((esp_timer_get_time() - start_us) < 30000000ULL) {
+    
+        while ((esp_timer_get_time() - (start_us)) < 10000000ULL) {
             if (lora_received()) {
+
                 uint8_t ack_buf[1];
                 if (lora_receive_packet(ack_buf, sizeof(ack_buf)) == 1 && ack_buf[0] == NODE_ID) {
                     ESP_LOGI(TAG, "Received ACK for sequence %d from master", pkt->sequence);
                     return true;
                 }
             }
+            
             vTaskDelay(pdMS_TO_TICKS(10));
         }
 
         ESP_LOGW(TAG, "No ACK received for sequence %d, retry %d/%d", pkt->sequence, i + 1, retries);
-        vTaskDelay(pdMS_TO_TICKS(1000 * (esp_random() % 10 + 1)));
+        vTaskDelay(pdMS_TO_TICKS(1000 * (esp_random() % 5 + 1)));
     }
 
     ESP_LOGE(TAG, "Failed to send packet sequence %d after %d retries", pkt->sequence, retries);
