@@ -15,7 +15,7 @@
 #include "sensor/battery.h"
 #include "driver/adc.h"
 
-#define NODE_ID 1
+#define NODE_ID 2
 #define MOISTURE_THRESHOLD 3276 // 80% of 4095
 #define BATTERY_MIN_MV 3300
 #define SYNC_WINDOW_S 90
@@ -25,8 +25,11 @@
 #define SLEEP_24H_US (24ULL * 3600 * 1000000ULL)
 
 #define SOIL_ADC_CHANNEL ADC2_CHANNEL_9
-#define TILT_PIN 15
-#define BATTERY_ADC_CHANNEL ADC_CHANNEL_3
+#define TILT_PIN1 33
+#define TILT_PIN2 15
+#define TILT_PIN3 23
+#define TILT_PIN4 22
+#define BATTERY_ADC_CHANNEL ADC_CHANNEL_4
 
 static const char* TAG = "NodeSensor";
 
@@ -78,15 +81,19 @@ static bool send_packet_with_ack(Packet* pkt, int retries) {
         lora_send_packet((uint8_t*)pkt, sizeof(Packet));
         ESP_LOGI(TAG, "Sent packet: node_id=%d, sequence=%d, soil=%d, tilt=%d, battery=%d, count=%d",
                  pkt->node_id, pkt->sequence, pkt->soil_moisture, pkt->tilt_status, pkt->battery_level, pkt->count);
-
+        
+        // Chờ ACK từ master
+        lora_receive(); // Ensure we are in receive mode
         uint64_t start_us = esp_timer_get_time();
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Wait for 1 second before checking for ACK
     
-        while ((esp_timer_get_time() - (start_us)) < 10000000ULL) {
+        while ((esp_timer_get_time() - start_us) < 9000000ULL) {
             if (lora_received()) {
-
+                ESP_LOGI(TAG, "Waiting for ACK packet from master");
                 uint8_t ack_buf[1];
                 if (lora_receive_packet(ack_buf, sizeof(ack_buf)) == 1 && ack_buf[0] == NODE_ID) {
-                    ESP_LOGI(TAG, "Received ACK for sequence %d from master", pkt->sequence);
+                    ESP_LOGI(TAG, "Received ACK for sequence from master");
+                    lora_receive(); // Đặt lại chế độ nhận sau khi nhận ACK
                     return true;
                 }
             }
@@ -99,13 +106,12 @@ static bool send_packet_with_ack(Packet* pkt, int retries) {
     }
 
     ESP_LOGE(TAG, "Failed to send packet sequence %d after %d retries", pkt->sequence, retries);
+    lora_receive(); // Đặt lại chế độ nhận nếu thất bại
     return false;
 }
 
 static void sync_with_master(void) {
     ESP_LOGI(TAG, "Waiting for Sync packet from master");
-
-    // KHÔNG gọi lora_init ở đây nữa
 
     uint64_t start_us = esp_timer_get_time();
     while ((esp_timer_get_time() - start_us) < SYNC_WINDOW_S * 1000000ULL) {
@@ -129,13 +135,14 @@ static void sync_with_master(void) {
                 };
                 read_sensors(&pkt);
                 send_packet_with_ack(&pkt, 3);
+                lora_receive(); // Đặt lại chế độ nhận sau khi gửi BT1
                 break;
             } else {
                 ESP_LOGW(TAG, "Invalid Sync packet received: len=%d, sync_id=%d, count_Sync=%d",
                          len, sync.sync_id, sync.count_Sync);
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     lora_sleep();
@@ -148,10 +155,12 @@ void app_main(void) {
     // ✅ Chỉ init LoRa 1 lần ở đây
     lora_init();
     lora_set_frequency(433E6);
-    lora_set_spreading_factor(10);
+    lora_set_spreading_factor(7); // Đổi thành SF 10 để khớp với Master
     lora_set_bandwidth(125E3);
     lora_set_coding_rate(5);
     lora_enable_crc();
+    lora_set_preamble_length(12);
+    lora_set_sync_word(0x34); // Thêm Sync Word để khớp với Master
     lora_set_tx_power(17);
 
     // Init sensors
@@ -159,25 +168,21 @@ void app_main(void) {
         ESP_LOGE(TAG, "Failed to initialize soil moisture sensor");
         return;
     }
-    tilt_sensor_init(TILT_PIN);
+    tilt_sensor_init(TILT_PIN1, TILT_PIN2, TILT_PIN3, TILT_PIN4);
 
     esp_sleep_enable_timer_wakeup(SLEEP_24H_US);
 
     while (1) {
         Packet pkt = {
             .node_id = NODE_ID,
-            .sequence = sequence++,
             .count = 0
         };
         read_sensors(&pkt);
 
         if (pkt.soil_moisture < MOISTURE_THRESHOLD) {
             ESP_LOGI(TAG, "Soil dry (%d < %d), sending BT0", pkt.soil_moisture, MOISTURE_THRESHOLD);
-            if (send_packet_with_ack(&pkt, 3)) {
-                ESP_LOGI(TAG, "Received ACK for BT0, entering deep sleep for 24h");
-                lora_sleep();
-                esp_deep_sleep_start();
-            }
+            lora_receive(); // Ensure we are in receive mode before sending
+            send_packet_with_ack(&pkt, 3);
             continue;
         } else {
             ESP_LOGI(TAG, "Soil wet (%d >= %d), sending BT0 and waiting for Sync", pkt.soil_moisture, MOISTURE_THRESHOLD);
@@ -203,6 +208,7 @@ void app_main(void) {
         }
 
         lora_sleep();
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Thay vTaskDelay bang sleep thuc su
+        esp_deep_sleep_start();
     }
 }

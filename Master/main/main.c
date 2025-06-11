@@ -75,7 +75,7 @@ static void send_sync(uint8_t count_Sync) {
 
 static void communication_task(void *pvParameters) {
     while (1) {
-        ESP_LOGI(TAG, "Checking for LoRa packet");
+        // ESP_LOGI(TAG, "Checking for LoRa packet");
         if (lora_received()) {
             Packet pkt;
             int len = lora_receive_packet((uint8_t*)&pkt, sizeof(pkt));
@@ -95,21 +95,31 @@ static void communication_task(void *pvParameters) {
                 slave->missed_rounds = 0;
 
                 if (pkt.soil_moisture < 3276) {
-                    vTaskDelay(pdMS_TO_TICKS(20000));
+                    vTaskDelay(pdMS_TO_TICKS(5000)); // Giảm delay xuống 1 giây để test nhanh hơn
                     send_ack(pkt.node_id);
                 } else {
-                    vTaskDelay(pdMS_TO_TICKS(20000));
+                    if(pkt.sequence ==0){
+                        ESP_LOGI(TAG, "Received first packet from node %d, sending ACK", pkt.node_id);
+                        send_ack(pkt.node_id);
+                    } else {
+                    vTaskDelay(pdMS_TO_TICKS(1000)); // Giảm delay xuống 1 giây để test nhanh hơn
                     for (int i = 1; i <= 3; i++) {
                         send_sync(i);
                         vTaskDelay(pdMS_TO_TICKS(SYNC_INTERVAL_MS));
                     }
                 }
+                }
 
                 current_round++;
+                lora_receive(); // Đặt lại chế độ nhận sau khi xử lý gói tin hợp lệ
             } else {
                 ESP_LOGW(TAG, "Invalid packet received: len=%d, node_id=%d", len, pkt.node_id);
+                lora_receive(); // Đặt lại chế độ nhận nếu gói tin không hợp lệ
             }
-        }
+        } 
+        // else {
+        //     ESP_LOGI(TAG, "No packet received"); // Thêm log khi không nhận được gói tin
+        // }
 
         if (current_round >= MAX_ROUNDS) {
             ESP_LOGI(TAG, "Reached max rounds (%d), sending Sync for reset", MAX_ROUNDS);
@@ -118,9 +128,10 @@ static void communication_task(void *pvParameters) {
                 vTaskDelay(pdMS_TO_TICKS(SYNC_INTERVAL_MS));
             }
             current_round = 0;
+            lora_receive(); // Đặt lại chế độ nhận sau khi reset
         }
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -130,12 +141,13 @@ static void data_processing_task(void *pvParameters) {
         int warning_count = 0;
         for (int i = 0; i < MAX_SLAVES; i++) {
             if (slaves[i].active) {
-                float soil_moisture_percent = ((4095.0 - slaves[i].last_soil_moisture) / 4095.0) * 100.0;
+                float soil_moisture_percent = ((
+                    slaves[i].last_soil_moisture) / 4095.0) * 100.0;
                 float battery_percent = ((slaves[i].last_battery_level - BATTERY_MIN_MV) / (float)(BATTERY_MAX_MV - BATTERY_MIN_MV)) * 100.0;
                 battery_percent = battery_percent < 0 ? 0 : (battery_percent > 100 ? 100 : battery_percent);
 
-                ESP_LOGI(TAG, "Node %d: Do am=%.2f%%, Nghieng=%d, Pin=%.2f%%",
-                         slaves[i].node_id, soil_moisture_percent, slaves[i].last_tilt_status, battery_percent);
+                // ESP_LOGI(TAG, "Node %d: Do am=%.2f%%, Nghieng=%d, Pin=%.2f%%",
+                //          slaves[i].node_id, soil_moisture_percent, slaves[i].last_tilt_status, battery_percent);
 
                 uint32_t now_s = esp_timer_get_time() / 1000000;
                 if (now_s - slaves[i].last_seen > 3 * 60) {
@@ -186,11 +198,11 @@ static void lcd_display_task(void *pvParameters) {
                  slaves[0].active ? 0 : 1,
                  slaves[1].active ? 0 : 1,
                  slaves[2].active ? 0 : 1);
-        esp32_lcd_i2c_set_cursor(&lcd, 0, 2);
+        esp32_lcd_i2c_set_cursor(&lcd, -4, 2);
         esp32_lcd_i2c_print(&lcd, lcd_buffer);
 
         snprintf(lcd_buffer, sizeof(lcd_buffer), "Canh bao muc:%1d", warning_level);
-        esp32_lcd_i2c_set_cursor(&lcd, 0, 3);
+        esp32_lcd_i2c_set_cursor(&lcd, -4, 3);
         esp32_lcd_i2c_print(&lcd, lcd_buffer);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -207,15 +219,15 @@ void app_main(void) {
         // Tiếp tục chạy để debug LCD và các tác vụ khác
     } else {
         ESP_LOGI(TAG, "Khoi tao LoRa thanh cong");
-        // Cấu hình LoRa trong app_main để đảm bảo hoạt động
         lora_set_frequency(433000000);
-        lora_set_spreading_factor(10);
+        lora_set_spreading_factor(7); // Giữ nguyên SF 10 như ban đầu
         lora_set_bandwidth(125E3);
         lora_set_coding_rate(5);
         lora_enable_crc();
         lora_set_preamble_length(12);
         lora_set_sync_word(0x34);
         lora_set_tx_power(17);
+        lora_receive(); // Đặt chế độ nhận ngay sau khi cấu hình
     }
 
     // Khởi tạo LCD
@@ -235,14 +247,14 @@ void app_main(void) {
     for (int i = 0; i < MAX_SLAVES; i++) {
         slaves[i].node_id = i + 1;
     }
-
+    esp32_lcd_i2c_backlight_on(&lcd);
     // Tạo các tác vụ
     xTaskCreate(communication_task, "CommTask", 8192, NULL, 5, NULL);
     xTaskCreate(data_processing_task, "DataTask", 8192, NULL, 5, NULL);
     xTaskCreate(lcd_display_task, "LcdTask", 8192, NULL, 4, NULL);
 
     while (1) {
-        ESP_LOGI(TAG, "Vong lap chinh app_main");
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    //     ESP_LOGI(TAG, "Vong lap chinh app_main");
+        vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
