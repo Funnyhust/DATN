@@ -6,22 +6,17 @@
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "esp_adc/adc_oneshot.h"
-#include "esp_random.h"
 #include "driver/gpio.h"
-#include "esp_timer.h"
-#include "lora/lora.h"
 #include "sensor/soil_moisture.h"
 #include "sensor/sw520.h"
 #include "sensor/battery.h"
 #include "driver/adc.h"
+#include "communication/communication.h"
+#include "lora/lora.h"
 
 #define NODE_ID 2
 #define MOISTURE_THRESHOLD 3276 // 80% of 4095
 #define BATTERY_MIN_MV 3300
-#define SYNC_WINDOW_S 90
-#define SYNC_MAX_INDEX 6
-#define SYNC_ID 0xFF
-#define MAX_BROADCAST_COUNT 100
 #define SLEEP_24H_US (24ULL * 3600 * 1000000ULL)
 
 #define SOIL_ADC_CHANNEL ADC2_CHANNEL_9
@@ -33,27 +28,11 @@
 
 static const char* TAG = "NodeSensor";
 
-typedef struct {
-    uint8_t node_id;
-    uint16_t sequence;
-    uint16_t soil_moisture;
-    uint8_t tilt_status;
-    uint16_t battery_level;
-    uint16_t count;
-} Packet;
-
-typedef struct {
-    uint8_t sync_id;
-    uint8_t count_Sync;
-    uint16_t count_Round;
-    uint32_t timestamp;
-} SyncPacket;
-
 static soil_moisture_sensor_t soil_moisture;
-static uint16_t sequence = 1;
 static bool is_synced = false;
 static uint32_t last_sync_time = 0;
 static uint16_t broadcast_count = 0;
+static uint16_t sequence = 1;
 
 static void read_sensors(Packet* pkt) {
     int adc_val;
@@ -76,94 +55,14 @@ static void read_sensors(Packet* pkt) {
     }
 }
 
-static bool send_packet_with_ack(Packet* pkt, int retries) {
-    for (int i = 0; i < retries; i++) {
-        lora_send_packet((uint8_t*)pkt, sizeof(Packet));
-        ESP_LOGI(TAG, "Sent packet: node_id=%d, sequence=%d, soil=%d, tilt=%d, battery=%d, count=%d",
-                 pkt->node_id, pkt->sequence, pkt->soil_moisture, pkt->tilt_status, pkt->battery_level, pkt->count);
-        
-        // Chờ ACK từ master
-        lora_receive(); // Ensure we are in receive mode
-        uint64_t start_us = esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Wait for 1 second before checking for ACK
-    
-        while ((esp_timer_get_time() - start_us) < 9000000ULL) {
-            if (lora_received()) {
-                ESP_LOGI(TAG, "Waiting for ACK packet from master");
-                uint8_t ack_buf[1];
-                if (lora_receive_packet(ack_buf, sizeof(ack_buf)) == 1 && ack_buf[0] == NODE_ID) {
-                    ESP_LOGI(TAG, "Received ACK for sequence from master");
-                    lora_receive(); // Đặt lại chế độ nhận sau khi nhận ACK
-                    return true;
-                }
-            }
-            
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
-
-        ESP_LOGW(TAG, "No ACK received for sequence %d, retry %d/%d", pkt->sequence, i + 1, retries);
-        vTaskDelay(pdMS_TO_TICKS(1000 * (esp_random() % 5 + 1)));
-    }
-
-    ESP_LOGE(TAG, "Failed to send packet sequence %d after %d retries", pkt->sequence, retries);
-    lora_receive(); // Đặt lại chế độ nhận nếu thất bại
-    return false;
-}
-
-static void sync_with_master(void) {
-    ESP_LOGI(TAG, "Waiting for Sync packet from master");
-
-    uint64_t start_us = esp_timer_get_time();
-    while ((esp_timer_get_time() - start_us) < SYNC_WINDOW_S * 1000000ULL) {
-        if (lora_received()) {
-            SyncPacket sync;
-            int len = lora_receive_packet((uint8_t*)&sync, sizeof(sync));
-            if (len == sizeof(sync) && sync.sync_id == SYNC_ID && sync.count_Sync >= 1 && sync.count_Sync <= SYNC_MAX_INDEX) {
-                last_sync_time = sync.timestamp;
-                is_synced = true;
-                ESP_LOGI(TAG, "Received Sync: round=%d, count_Sync=%d, timestamp=%" PRIu32,
-                         sync.count_Round, sync.count_Sync, sync.timestamp);
-
-                uint32_t delay_s = 5 + (NODE_ID - 1) * 10 + 10 * (6 - sync.count_Sync);
-                ESP_LOGI(TAG, "Waiting %" PRIu32 " seconds before sending BT1", delay_s);
-                vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
-
-                Packet pkt = {
-                    .node_id = NODE_ID,
-                    .sequence = sequence++,
-                    .count = ++broadcast_count
-                };
-                read_sensors(&pkt);
-                send_packet_with_ack(&pkt, 3);
-                lora_receive(); // Đặt lại chế độ nhận sau khi gửi BT1
-                break;
-            } else {
-                ESP_LOGW(TAG, "Invalid Sync packet received: len=%d, sync_id=%d, count_Sync=%d",
-                         len, sync.sync_id, sync.count_Sync);
-            }
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-
-    lora_sleep();
-    ESP_LOGI(TAG, "Sync window closed, LoRa module in sleep mode");
-}
-
 void app_main(void) {
     ESP_LOGI(TAG, "Node %d starting", NODE_ID);
 
-    // ✅ Chỉ init LoRa 1 lần ở đây
-    lora_init();
-    lora_set_frequency(433E6);
-    lora_set_spreading_factor(7); // Đổi thành SF 10 để khớp với Master
-    lora_set_bandwidth(125E3);
-    lora_set_coding_rate(5);
-    lora_enable_crc();
-    lora_set_preamble_length(12);
-    lora_set_sync_word(0x34); // Thêm Sync Word để khớp với Master
-    lora_set_tx_power(17);
+    if (lora_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize LoRa");
+        return;
+    }
 
-    // Init sensors
     if (soil_moisture_init(&soil_moisture, SOIL_ADC_CHANNEL) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize soil moisture sensor");
         return;
@@ -181,13 +80,12 @@ void app_main(void) {
 
         if (pkt.soil_moisture < MOISTURE_THRESHOLD) {
             ESP_LOGI(TAG, "Soil dry (%d < %d), sending BT0", pkt.soil_moisture, MOISTURE_THRESHOLD);
-            lora_receive(); // Ensure we are in receive mode before sending
             send_packet_with_ack(&pkt, 3);
             continue;
         } else {
             ESP_LOGI(TAG, "Soil wet (%d >= %d), sending BT0 and waiting for Sync", pkt.soil_moisture, MOISTURE_THRESHOLD);
             send_packet_with_ack(&pkt, 3);
-            sync_with_master();
+            sync_with_master(&pkt, &is_synced, &broadcast_count, &last_sync_time);
 
             while (is_synced && broadcast_count < MAX_BROADCAST_COUNT) {
                 Packet pkt = {
@@ -208,7 +106,6 @@ void app_main(void) {
         }
 
         lora_sleep();
-        // Thay vTaskDelay bang sleep thuc su
         esp_deep_sleep_start();
     }
 }
