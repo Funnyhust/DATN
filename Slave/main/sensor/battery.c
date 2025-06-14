@@ -27,7 +27,7 @@ esp_err_t battery_read(adc_channel_t adc_channel, uint16_t *battery_mv) {
     ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, adc_channel, &adc_val));
 
     // Chuyển đổi sang mV: (ADC * Vref / max_adc) * 2 (do mạch phân áp)
-    *battery_mv = (adc_val * 3300 / 4095) * 2;
+    *battery_mv = (adc_val * 3300 / 4095);
     //ESP_LOGI(TAG, "Battery ADC raw: %d, mV: %d", adc_val, *battery_mv);
 
     // Giải phóng ADC

@@ -27,13 +27,11 @@
 #define TILT_PIN4 22
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_4
 
-uint32_t time_to_next_sync = 0;
+uint32_t time_to_next_round = 0;
 
 static const char* TAG = "NodeSensor";
 
 static soil_moisture_sensor_t soil_moisture;
-static uint32_t last_sync_time = 0;
-static uint16_t broadcast_count = 0;
 
 uint16_t rainfall = 0; // Placeholder for rainfall data, if needed
 
@@ -70,13 +68,13 @@ void app_main(void) {
     tilt_sensor_init(TILT_PIN1, TILT_PIN2, TILT_PIN3, TILT_PIN4);
 
     esp_sleep_enable_timer_wakeup(SLEEP_24H_US);
-
+/**
     while (1) {
         Packet pkt = {
             .node_id = NODE_ID,
         };
         read_sensors(&pkt);
-/*
+
 //Nếu độ ẩm dưới ngưỡng, gửi gói tin và đi ngủ, lora ngủ 24h, esp32 ngủ, dậy mỗi 10s để đọc lại cảm biến
         if (pkt.soil_moisture < MOISTURE_THRESHOLD) {
             ESP_LOGI(TAG, "Soil dry (%d < %d), sending BT0", pkt.soil_moisture, MOISTURE_THRESHOLD);
@@ -103,10 +101,10 @@ void app_main(void) {
 
 // Nếu độ ẩm trên ngưỡng, gửi gói tin và đợi đồng bộ với master
         else {
-         if(send_packet_with_sync(&pkt,&time_to_next_sync)) {
-            vTaskDelay(pdMS_TO_TICKS(10000*(NODE_ID-1)+3000)); //
+         if(send_packet_with_sync(&pkt,&time_to_next_round)) {
+            vTaskDelay(time_to_next_round); //
             uint32_t current_time = esp_timer_get_time() / 1000;
-            while (esp_timer_get_time() / 1000 - current_time < time_to_next_sync) {
+                while(1){
                 read_sensors(&pkt);
                 if (pkt.soil_moisture < MOISTURE_THRESHOLD) {
                      break;
@@ -116,16 +114,33 @@ void app_main(void) {
                     // ESP_LOGI(TAG, "Sending packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
                     // pkt->node_id, pkt->rainfall, pkt->soil_moisture,
                     // pkt->tilt_status, pkt->battery_level);
-
                     lora_send_packet((uint8_t*)&pkt, sizeof(Packet));
                     lora_receive();
                     esp_sleep_enable_timer_wakeup(3 *10 * 100000);  // Thiết lập wake-up sau 10 giây
                     esp_light_sleep_start(); 
                 }
-            }
          }
-         */
-         while(1){
+        }
+        *///////// 
+         Packet pkt = {
+            .node_id = NODE_ID,
+        };
+   while(1){
+            ESP_LOGI(TAG, "Node %d is awake, reading sensors", NODE_ID);
+            read_sensors(&pkt);
+            if (lora_send_packet((uint8_t*)&pkt, sizeof(Packet)) == ESP_OK) {
+        ESP_LOGI(TAG, "Packet sent successfully");
+    } else {
+        ESP_LOGE(TAG, "Failed to send packet");
+    }       
+            lora_sleep();
+            esp_sleep_enable_timer_wakeup(1 *3 * 100000); 
+            esp_light_sleep_start(); 
+         }
+        }
+//     }
+// }
+/*         while(1){
             ESP_LOGI(TAG, "Node %d is awake, reading sensors", NODE_ID);
             read_sensors(&pkt);
             if (lora_send_packet((uint8_t*)&pkt, sizeof(Packet)) == ESP_OK) {
@@ -136,39 +151,7 @@ void app_main(void) {
             vTaskDelay(10); // Delay 10s + (NODE_ID - 1) * 10s
             lora_sleep();
             vTaskDelay(10);
-            esp_sleep_enable_timer_wakeup(1 *10 * 100000); 
+            esp_sleep_enable_timer_wakeup(1 *5 * 100000); 
             vTaskDelay(10); // Thiết lập wake-up sau 10 giây
             esp_light_sleep_start(); 
-         }
-         
-        //     ESP_LOGI(TAG, "Soil wet (%d >= %d), sending BT0 and waiting for Sync", pkt.soil_moisture, MOISTURE_THRESHOLD);
-        //     if(!(send_packet_with_ack(&pkt))) {
-        //         ESP_LOGE(TAG, "Failed to send initial packet, retrying...");
-        //         continue;
-        //     }
-
-        //     sync_with_master(&pkt, &is_synced, &broadcast_count, &last_sync_time);
-
-        //     while (is_synced && broadcast_count < MAX_BROADCAST_COUNT) {
-        //         Packet pkt = {
-        //             .node_id = NODE_ID,
-        //             .sequence = sequence++,
-        //             .count = ++broadcast_count
-        //         };
-        //         read_sensors(&pkt);
-        //         send_packet_with_ack(&pkt, 3);
-        //         vTaskDelay(pdMS_TO_TICKS(1000));
-        //     }
-
-        //     if (broadcast_count >= MAX_BROADCAST_COUNT) {
-        //         is_synced = false;
-        //         broadcast_count = 0;
-        //         ESP_LOGI(TAG, "Completed 100 BT1 transmissions, waiting for Sync again");
-        //     }
-        // }
-
-        // lora_sleep();
-        // esp_deep_sleep_start();
-    //     vTaskDelay(pdMS_TO_TICKS(1000));
-}
-}
+         }*/

@@ -22,12 +22,12 @@ typedef struct {
 
 typedef struct {
     uint8_t sync_id;
-    uint32_t time_to_next_sync;
+    uint32_t time_to_next_round;
 } SyncPacket;
 
 void communication_init(uint8_t node_id);
 bool send_packet_with_ack(Packet* pkt);
-bool send_packet_with_sync(Packet* pkt, uint32_t *time_to_next_sync);
+bool send_packet_with_sync(Packet* pkt, uint32_t *time_to_next_round);
 // void sync_with_master(Packet* initial_pkt, bool* is_synced, uint16_t* broadcast_count, uint32_t* last_sync_time);
 
 #endif // COMMUNICATION_H
