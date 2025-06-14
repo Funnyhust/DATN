@@ -16,17 +16,17 @@ void communication_init(uint8_t node_id) {
         lora_enable_crc();
         lora_set_preamble_length(12);
         lora_set_sync_word(0x34);
-        lora_set_tx_power(1);
+        lora_set_tx_power(20);
         lora_receive();
     }
 }
 
-bool send_packet_with_ack(Packet* pkt, int retries) {
-    ESP_LOGI(TAG, "Sending packet: node_id=%d, sequence=%d, count=%d",
-            pkt->node_id, pkt->sequence, pkt->count);
-    for (int i = 0; i < retries; i++) {
+bool send_packet_with_ack(Packet* pkt) {
+    ESP_LOGI(TAG, "Sending packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
+             pkt->node_id, pkt->rainfall, pkt->soil_moisture,
+             pkt->tilt_status, pkt->battery_level);
+
         lora_send_packet((uint8_t*)pkt, sizeof(Packet));
-        ESP_LOGI(TAG, "Sent packet, waiting for ACK (attempt %d/%d)", i + 1, retries);
         lora_receive();
 
         uint32_t start_time = esp_timer_get_time() / 1000;
@@ -43,36 +43,60 @@ bool send_packet_with_ack(Packet* pkt, int retries) {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
         ESP_LOGW(TAG, "No ACK received, retrying...");
-    }
-    ESP_LOGE(TAG, "Failed to receive ACK after %d retries", retries);
     lora_receive();
     return false;
 }
+bool send_packet_with_sync(Packet* pkt, uint32_t *time_to_next_sync) {
+    ESP_LOGI(TAG, "Sending packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
+             pkt->node_id, pkt->rainfall, pkt->soil_moisture,
+             pkt->tilt_status, pkt->battery_level);
 
-void sync_with_master(Packet* initial_pkt, bool* is_synced, uint16_t* broadcast_count, uint32_t* last_sync_time) {
-    ESP_LOGI(TAG, "Sending initial packet and waiting for Sync");
-    if (send_packet_with_ack(initial_pkt, 3)) {
+        lora_send_packet((uint8_t*)pkt, sizeof(Packet));
+        lora_receive();
+
         uint32_t start_time = esp_timer_get_time() / 1000;
-        while (esp_timer_get_time() / 1000 - start_time < 20000) {
+        while (esp_timer_get_time() / 1000 - start_time < 5000) {
             if (lora_received()) {
-                SyncPacket sync;
-                int len = lora_receive_packet((uint8_t*)&sync, sizeof(sync));
-                if (len == sizeof(sync) && sync.sync_id == SYNC_ID && sync.count_Sync == 3) {
-                    ESP_LOGI(TAG, "Received Sync: count_Sync=%d, round=%d, timestamp=%" PRIu32,
-                             sync.count_Sync, sync.count_Round, sync.timestamp);
-                    *is_synced = true;
-                    *broadcast_count = sync.count_Round;
-                    *last_sync_time = esp_timer_get_time() / 1000;
+                SyncPacket Sync_pkt;
+                int len = lora_receive_packet((uint8_t*)&Sync_pkt, sizeof(Sync_pkt));
+                if (len == sizeof(Sync_pkt) && Sync_pkt.sync_id ==  NODE_ID) {
+                    ESP_LOGI(TAG, "Received ACK for node %d", pkt->node_id);
+                    *time_to_next_sync = Sync_pkt.time_to_next_sync;
                     lora_receive();
-                    return;
+                    return true;
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(10));
         }
-        ESP_LOGW(TAG, "No Sync received within 20s");
-    } else {
-        ESP_LOGW(TAG, "Failed to send initial packet");
-    }
-    *is_synced = false;
+        ESP_LOGW(TAG, "No ACK received, retrying...");
     lora_receive();
+    return false;
 }
+
+// void sync_with_master(Packet* initial_pkt, bool* is_synced, uint16_t* broadcast_count, uint32_t* last_sync_time) {
+//     ESP_LOGI(TAG, "Sending initial packet and waiting for Sync");
+//     if (send_packet_with_ack(initial_pkt)) {
+//         uint32_t start_time = esp_timer_get_time() / 1000;
+//         while (esp_timer_get_time() / 1000 - start_time < 20000) {
+//             if (lora_received()) {
+//                 SyncPacket sync;
+//                 int len = lora_receive_packet((uint8_t*)&sync, sizeof(sync));
+//                 if (len == sizeof(sync) && sync.sync_id == SYNC_ID && sync.count_Sync == 3) {
+//                     ESP_LOGI(TAG, "Received Sync: count_Sync=%d, round=%d, timestamp=%" PRIu32,
+//                              sync.count_Sync, sync.count_Round, sync.timestamp);
+//                     *is_synced = true;
+//                     *broadcast_count = sync.count_Round;
+//                     *last_sync_time = esp_timer_get_time() / 1000;
+//                     lora_receive();
+//                     return;
+//                 }
+//             }
+//             vTaskDelay(pdMS_TO_TICKS(10));
+//         }
+//         ESP_LOGW(TAG, "No Sync received within 20s");
+//     } else {
+//         ESP_LOGW(TAG, "Failed to send initial packet");
+//     }
+//     *is_synced = false;
+//     lora_receive();
+// }

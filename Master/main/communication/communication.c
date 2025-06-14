@@ -35,9 +35,10 @@ void communication_init(SlaveStatus* slaves, uint16_t* current_round) {
         lora_enable_crc();
         lora_set_preamble_length(12);
         lora_set_sync_word(0x34);
-        lora_set_tx_power(17);
+        lora_set_tx_power(20);
         lora_receive();
     }
+
 
     for (int i = 0; i < MAX_SLAVES; i++) {
         slaves[i].node_id = i + 1;

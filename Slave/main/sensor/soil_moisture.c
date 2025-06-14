@@ -38,7 +38,7 @@ esp_err_t soil_moisture_read_raw(soil_moisture_sensor_t *sensor, int *adc_value)
 
     // Đọc giá trị ADC
     ESP_ERROR_CHECK(adc_oneshot_read(adc2_handle, sensor->adc_channel, adc_value));
-    ESP_LOGI(TAG, "Soil moisture ADC raw value: %d", *adc_value);
+   // ESP_LOGI(TAG, "Soil moisture ADC raw value: %d", *adc_value);
 
     // Giải phóng ADC
     ESP_ERROR_CHECK(adc_oneshot_del_unit(adc2_handle));

@@ -402,7 +402,7 @@ lora_init(void)
  * @param buf Data to be sent
  * @param size Size of data.
  */
-void 
+esp_err_t 
 lora_send_packet(uint8_t *buf, int size)
 {
    /*
@@ -424,6 +424,7 @@ lora_send_packet(uint8_t *buf, int size)
       vTaskDelay(2);
 
    lora_write_reg(REG_IRQ_FLAGS, IRQ_TX_DONE_MASK);
+   return ESP_OK;
 }
 
 /**

@@ -2,9 +2,10 @@
 #define COMMUNICATION_H
 
 #include <stdint.h>
-#include "lora/lora.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lora/lora.h"
+#include "esp_timer.h"
 
 #define SYNC_ID 0xFF
 #define MAX_SLAVES 3
@@ -38,7 +39,11 @@ typedef struct {
     uint8_t missed_rounds;
 } SlaveStatus;
 
-void communication_init(SlaveStatus* slaves, uint16_t* current_round);
+extern SlaveStatus slaves[MAX_SLAVES];
+extern uint16_t current_round;
+
+// void send_ack(uint8_t node_id);
+// void send_sync(uint8_t count_Sync, uint16_t current_round);
 void communication_task(void *pvParameters);
 
 #endif // COMMUNICATION_H
