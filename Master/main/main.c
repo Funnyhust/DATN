@@ -123,10 +123,6 @@ static void communication_task(void *pvParameters) {
                 lora_receive(); // Đặt lại chế độ nhận nếu gói tin không hợp lệ
             }
         } 
-
-        // else {
-        //     ESP_LOGI(TAG, "No packet received"); // Thêm log khi không nhận được gói tin
-        // }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
@@ -136,30 +132,39 @@ static void data_processing_task(void *pvParameters) {
     ESP_LOGI(TAG, "Khoi tao task xu ly du lieu");
     while (1) {
         int warning_count = 0;
+        // Kiểm tra tất cả các node trong một vòng lặp
         for (int i = 0; i < MAX_SLAVES; i++) {
+            // Kiểm tra trạng thái đồng bộ
+            if ((esp_timer_get_time() / 1000 - slaves[i].last_time_sync) > 45000) {
+                slaves[i].active = false;
+            }
+            // Chỉ xử lý node đang hoạt động để tính độ ẩm và pin
             if (slaves[i].active) {
-                float soil_moisture_percent = (( slaves[i].last_soil_moisture) / 4095.0) * 100.0;
-                battery_percent = ((slaves[i].last_battery_level - BATTERY_MIN_MV) / (float)(BATTERY_MAX_MV - BATTERY_MIN_MV)) * 100.0;
+                float soil_moisture_percent = ((slaves[i].last_soil_moisture) / 4095.0) * 100.0;
+                float battery_percent = ((slaves[i].last_battery_level - BATTERY_MIN_MV) / (float)(BATTERY_MAX_MV - BATTERY_MIN_MV)) * 100.0;
                 battery_percent = battery_percent < 0 ? 0 : (battery_percent > 100 ? 100 : battery_percent);
 
-                // ESP_LOGI(TAG, "Node %d: Do am=%.2f%%, Nghieng=%d, Pin=%.2f%%",
-                //          slaves[i].node_id, soil_moisture_percent, slaves[i].last_tilt_status, battery_percent);
-
-                uint32_t now_s = esp_timer_get_time() / 1000000;
-        for(int i=0;i<3;i++){
-            if((esp_timer_get_time() / 1000-slaves[i].last_time_sync)>45000) slaves[i].active=false;
-        }
-
-                if ((slaves[i].last_tilt_status == 1 || !slaves[i].active) && battery_percent > 30) {
+                // Kiểm tra điều kiện cảnh báo
+                if ((slaves[i].last_tilt_status == 1 || !slaves[i].active)) {
+                    warning_count++;
+                }
+            } else {
+                // Nếu node không hoạt động, vẫn kiểm tra điều kiện cảnh báo
+                float battery_percent = ((slaves[i].last_battery_level - BATTERY_MIN_MV) / (float)(BATTERY_MAX_MV - BATTERY_MIN_MV)) * 100.0;
+                battery_percent = battery_percent < 0 ? 0 : (battery_percent > 100 ? 100 : battery_percent);
+                if (!slaves[i].active) {
                     warning_count++;
                 }
             }
         }
 
-                if (xSemaphoreTake(warning_level_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        // Cập nhật warning_level
+        if (xSemaphoreTake(warning_level_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
             warning_level = (warning_count >= 3) ? 3 : (warning_count >= 2) ? 2 : (warning_count == 1) ? 1 : 0;
             xSemaphoreGive(warning_level_mutex);
         }
+
+        // In thông báo nếu có cảnh báo
         if (warning_level > 0) {
             ESP_LOGW(TAG, "Muc canh bao %d: %d node co van de", warning_level, warning_count);
         }
@@ -175,35 +180,30 @@ static void lcd_display_task(void *pvParameters) {
 
     while (1) {
         esp32_lcd_i2c_clear(&lcd);
-        snprintf(lcd_buffer, sizeof(lcd_buffer), "Hu Til Pin Sta W");
-        esp32_lcd_i2c_set_cursor(&lcd, 0, 0);     
-        esp32_lcd_i2c_print(&lcd, lcd_buffer);   
 
-        snprintf(lcd_buffer, sizeof(lcd_buffer), "%3.0f %1d %2.0f %1d %1d",
+        snprintf(lcd_buffer, sizeof(lcd_buffer), "Humi:%3.0f %3.0f %3.0f",
                  slaves[0].active ? ((slaves[0].last_soil_moisture) / 4095.0) * 100.0 : 0,
-                 slaves[0].active ? slaves[0].last_tilt_status : 0,  
-                 slaves[0].active ? battery_percent : 0,               
-                 slaves[0].active ? 1 : 0,
-                 warning_level);
+                 slaves[1].active ? ((slaves[1].last_soil_moisture) / 4095.0) * 100.0 : 0,
+                 slaves[2].active ? ((slaves[2].last_soil_moisture) / 4095.0) * 100.0 : 0);
+        esp32_lcd_i2c_set_cursor(&lcd, 0, 0);
+        esp32_lcd_i2c_print(&lcd, lcd_buffer);
+
+        snprintf(lcd_buffer, sizeof(lcd_buffer), "Tilt:%1d %1d %1d",
+                 slaves[0].active ? slaves[0].last_tilt_status : 0,
+                 slaves[1].active ? slaves[1].last_tilt_status : 0,
+                 slaves[2].active ? slaves[2].last_tilt_status : 0);
         esp32_lcd_i2c_set_cursor(&lcd, 0, 1);
         esp32_lcd_i2c_print(&lcd, lcd_buffer);
 
-        snprintf(lcd_buffer, sizeof(lcd_buffer), "%3.0f %1d %2.0f %1d %1d",
-                 slaves[1].active ? ((slaves[1].last_soil_moisture) / 4095.0) * 100.0 : 0,
-                 slaves[1].active ? slaves[1].last_tilt_status : 0,  
-                 slaves[1].active ? battery_percent : 0,               
+        snprintf(lcd_buffer, sizeof(lcd_buffer), "Status:%1d %1d %1d",
+                 slaves[0].active ? 1 : 0,
                  slaves[1].active ? 1 : 0,
-                 warning_level);
-        esp32_lcd_i2c_set_cursor(&lcd, -4, 2);
-        esp32_lcd_i2c_print(&lcd, lcd_buffer);  
+                 slaves[2].active ? 1 : 0);
+        esp32_lcd_i2c_set_cursor(&lcd, 0, 2);
+        esp32_lcd_i2c_print(&lcd, lcd_buffer);
 
-        snprintf(lcd_buffer, sizeof(lcd_buffer), "%3.0f %1d %2.0f %1d %1d",
-                 slaves[2].active ? ((slaves[2].last_soil_moisture) / 4095.0) * 100.0 : 0,
-                 slaves[2].active ? slaves[2].last_tilt_status : 0,  
-                 slaves[2].active ? battery_percent: 0,               
-                 slaves[2].active ? 1 : 0,
-                 warning_level);
-        esp32_lcd_i2c_set_cursor(&lcd, -4, 3);
+        snprintf(lcd_buffer, sizeof(lcd_buffer), "Canh bao muc:%1d", warning_level);
+        esp32_lcd_i2c_set_cursor(&lcd, 0, 3);
         esp32_lcd_i2c_print(&lcd, lcd_buffer);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -212,8 +212,8 @@ static void lcd_display_task(void *pvParameters) {
 
 void warning_task(void *pvParameters) {
     ESP_LOGI(TAG, "Khoi tao task dieu khien buzzer");
+    uint8_t level = 0;
     while (1) {
-        uint8_t level = 0;
         if (xSemaphoreTake(warning_level_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
             level = warning_level;
             xSemaphoreGive(warning_level_mutex);
@@ -221,20 +221,24 @@ void warning_task(void *pvParameters) {
 
         switch (level) {
             case 1:
+            ESP_LOGI(TAG, "Canh bao 1");
                 buzzer_on();
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                buzzer_play_note(1000, 1000); // Tần số 1kHz, 1 giây
-                   vTaskDelay(pdMS_TO_TICKS(1000));             
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Bật buzzer trong 1 giây          
                 buzzer_off();
                 vTaskDelay(pdMS_TO_TICKS(1000)); // Nghỉ 1 giây
                 break;
             case 2:
-                buzzer_play_note(1500, 500); // Tần số 1.5kHz, 0.5 giây
-                vTaskDelay(pdMS_TO_TICKS(500)); // Nghỉ 0.5 giây
+            ESP_LOGI(TAG, "Canh bao 2");
+                buzzer_on();
+                vTaskDelay(pdMS_TO_TICKS(500));// Bật buzzer trong 0.5 giây          
+                buzzer_off();
+                vTaskDelay(pdMS_TO_TICKS(500));// Nghỉ 0.5 giây 
                 break;
             case 3:
-                buzzer_play_note(2000, 250); // Tần số 2kHz, 0.25 giây
-                vTaskDelay(pdMS_TO_TICKS(250)); // Nghỉ 0.25 giây
+                buzzer_on();
+                vTaskDelay(pdMS_TO_TICKS(250));// Bật buzzer trong 0.25 giây        
+                buzzer_off();
+                vTaskDelay(pdMS_TO_TICKS(250));// Nghỉ 0.25 giây
                 break;
             default:
                 buzzer_off();

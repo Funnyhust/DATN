@@ -5,7 +5,7 @@
 #include "driver/ledc.h"
 
 // Định nghĩa chân và cấu hình PWM
-#define BUZZER_PIN GPIO_NUM_35       // Chân GPIO cho buzzer
+#define BUZZER_PIN 35       // Chân GPIO cho buzzer
 #define PWM_CHANNEL LEDC_CHANNEL_0   // Kênh PWM
 #define PWM_TIMER LEDC_TIMER_0      // Timer PWM
 #define PWM_RESOLUTION LEDC_TIMER_8_BIT // Độ phân giải 8 bit
