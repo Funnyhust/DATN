@@ -22,7 +22,7 @@ void communication_init(uint8_t node_id) {
 }
 
 bool send_packet_with_ack(Packet* pkt) {
-    ESP_LOGI(TAG, "Sending packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
+    ESP_LOGI(TAG, "Sending ACK packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
              pkt->node_id, pkt->rainfall, pkt->soil_moisture,
              pkt->tilt_status, pkt->battery_level);
 
@@ -47,7 +47,7 @@ bool send_packet_with_ack(Packet* pkt) {
     return false;
 }
 bool send_packet_with_sync(Packet* pkt, uint32_t *time_to_next_round) {
-    ESP_LOGI(TAG, "Sending packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
+    ESP_LOGI(TAG, "Sending Sync packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
              pkt->node_id, pkt->rainfall, pkt->soil_moisture,
              pkt->tilt_status, pkt->battery_level);
 
@@ -59,16 +59,17 @@ bool send_packet_with_sync(Packet* pkt, uint32_t *time_to_next_round) {
             if (lora_received()) {
                 SyncPacket Sync_pkt;
                 int len = lora_receive_packet((uint8_t*)&Sync_pkt, sizeof(Sync_pkt));
-                if (len == sizeof(Sync_pkt) && Sync_pkt.sync_id ==  NODE_ID) {
-                    ESP_LOGI(TAG, "Received ACK for node %d", pkt->node_id);
+                if (len == sizeof(Sync_pkt) && Sync_pkt.sync_id ==  SYNC_ID) {
+                    ESP_LOGI(TAG, "Received Sync for node %d", pkt->node_id);
                     *time_to_next_round = Sync_pkt.time_to_next_round;
                     lora_receive();
+
                     return true;
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(10));
         }
-        ESP_LOGW(TAG, "No ACK received, retrying...");
+        ESP_LOGW(TAG, "No Sync received, retrying...");
     lora_receive();
     return false;
 }

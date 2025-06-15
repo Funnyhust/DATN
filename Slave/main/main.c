@@ -16,7 +16,7 @@
 #include "esp_timer.h"
 
 
-#define MOISTURE_THRESHOLD 3276 // 80% of 4095
+#define MOISTURE_THRESHOLD 3000 // 80% of 4095
 #define BATTERY_MIN_MV 3300
 #define SLEEP_24H_US (24ULL * 3600 * 1000000ULL)
 
@@ -68,10 +68,11 @@ void app_main(void) {
     tilt_sensor_init(TILT_PIN1, TILT_PIN2, TILT_PIN3, TILT_PIN4);
 
     esp_sleep_enable_timer_wakeup(SLEEP_24H_US);
-/**
+
     while (1) {
         Packet pkt = {
             .node_id = NODE_ID,
+            .is_sync =false,
         };
         read_sensors(&pkt);
 
@@ -102,6 +103,7 @@ void app_main(void) {
 // Nếu độ ẩm trên ngưỡng, gửi gói tin và đợi đồng bộ với master
         else {
          if(send_packet_with_sync(&pkt,&time_to_next_round)) {
+            pkt.is_sync=true;
             vTaskDelay(time_to_next_round); //
             uint32_t current_time = esp_timer_get_time() / 1000;
                 while(1){
@@ -114,32 +116,22 @@ void app_main(void) {
                     // ESP_LOGI(TAG, "Sending packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
                     // pkt->node_id, pkt->rainfall, pkt->soil_moisture,
                     // pkt->tilt_status, pkt->battery_level);
+                    ESP_LOGI(TAG, "Slave");
                     lora_send_packet((uint8_t*)&pkt, sizeof(Packet));
                     lora_receive();
-                    esp_sleep_enable_timer_wakeup(3 *10 * 100000);  // Thiết lập wake-up sau 10 giây
+                    esp_sleep_enable_timer_wakeup(3 *10 * 1000000);  // Thiết lập wake-up sau 10 giây
                     esp_light_sleep_start(); 
                 }
          }
         }
-        *///////// 
+     
          Packet pkt = {
             .node_id = NODE_ID,
         };
-   while(1){
-            ESP_LOGI(TAG, "Node %d is awake, reading sensors", NODE_ID);
-            read_sensors(&pkt);
-            if (lora_send_packet((uint8_t*)&pkt, sizeof(Packet)) == ESP_OK) {
-        ESP_LOGI(TAG, "Packet sent successfully");
-    } else {
-        ESP_LOGE(TAG, "Failed to send packet");
-    }       
-            lora_sleep();
-            esp_sleep_enable_timer_wakeup(1 *3 * 100000); 
-            esp_light_sleep_start(); 
-         }
+
         }
-//     }
-// }
+     }
+ }
 /*         while(1){
             ESP_LOGI(TAG, "Node %d is awake, reading sensors", NODE_ID);
             read_sensors(&pkt);

@@ -32,6 +32,7 @@ typedef struct {
     uint16_t soil_moisture;
     uint8_t tilt_status;
     uint16_t battery_level;
+    bool is_sync;
 } Packet;
 
 typedef struct {
@@ -64,6 +65,7 @@ static void send_ack(uint8_t node_id) {
 
 // Gửi gói tin đồng bộ hóa
 static void send_sync(uint8_t node_id) {
+    ESP_LOGI(TAG, "Sending Sync to node %d", node_id);
 SyncPacket sync = {
         .sync_id = SYNC_ID,
         .time_to_next_round = 0
@@ -104,12 +106,13 @@ static void communication_task(void *pvParameters) {
                 slave->last_battery_level = pkt.battery_level;
                 slave->missed_rounds = 0;
                 // Kiểm tra độ ẩm đất và gửi ACK hoặc Sync
-                if (pkt.soil_moisture < 3276) {
+                if (pkt.soil_moisture < 3000) {
                     slave->active = true;// Giảm delay xuống 1 giây để test nhanh hơn
                     send_ack(pkt.node_id);
                 } else {
                     slave->last_time_sync = esp_timer_get_time()/1000;
-                    if(slave->active == false){
+                    if(!pkt.is_sync){
+                    vTaskDelay(pdMS_TO_TICKS(1500));
                     slave->active = true; // Giảm delay xuống 1 giây để test nhanh hơn
                     send_sync(pkt.node_id);
                 }

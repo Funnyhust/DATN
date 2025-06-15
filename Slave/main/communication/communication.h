@@ -6,7 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define NODE_ID 2
+#define NODE_ID 3
 #define SYNC_ID 0xFF
 #define MAX_BROADCAST_COUNT 100
 #define SYNC_INTERVAL_MS 5000
@@ -18,6 +18,7 @@ typedef struct {
     uint16_t soil_moisture;
     uint8_t tilt_status;
     uint16_t battery_level;
+    bool is_sync;
 } Packet;
 
 typedef struct {
