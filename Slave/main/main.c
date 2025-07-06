@@ -15,7 +15,7 @@
 #include "lora/lora.h"
 #include "esp_timer.h"
 
-
+// 1h32 6/7/2025
 #define BATTERY_MIN_MV 3300
 #define SLEEP_24H_US (24ULL * 3600 * 1000000ULL)
 
