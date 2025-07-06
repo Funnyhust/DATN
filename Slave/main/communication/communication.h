@@ -14,10 +14,10 @@
 
 typedef struct {
     uint8_t node_id;
-    uint16_t rainfall;
     uint16_t soil_moisture;
     uint8_t tilt_status;
     uint16_t battery_level;
+    uint32_t rain_count;
     bool is_sync;
 } Packet;
 

@@ -22,8 +22,8 @@ void communication_init(uint8_t node_id) {
 }
 
 bool send_packet_with_ack(Packet* pkt) {
-    ESP_LOGI(TAG, "Sending ACK packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
-             pkt->node_id, pkt->rainfall, pkt->soil_moisture,
+    ESP_LOGI(TAG, "Sending ACK packet: node_id=%d, rain_count=%lu, soil_moisture=%d, tilt_status=%d, battery_level=%d",
+             pkt->node_id, pkt->rain_count, pkt->soil_moisture,
              pkt->tilt_status, pkt->battery_level);
 
         lora_send_packet((uint8_t*)pkt, sizeof(Packet));
@@ -47,8 +47,8 @@ bool send_packet_with_ack(Packet* pkt) {
     return false;
 }
 bool send_packet_with_sync(Packet* pkt, uint32_t *time_to_next_round) {
-    ESP_LOGI(TAG, "Sending Sync packet: node_id=%d, rainfall=%d, soil_moisture=%d, tilt_status=%d, battery_level=%d",
-             pkt->node_id, pkt->rainfall, pkt->soil_moisture,
+    ESP_LOGI(TAG, "Sending Sync packet: node_id=%d, rain_count=%lu, soil_moisture=%d, tilt_status=%d, battery_level=%d",
+             pkt->node_id, pkt->rain_count, pkt->soil_moisture,
              pkt->tilt_status, pkt->battery_level);
 
         lora_send_packet((uint8_t*)pkt, sizeof(Packet));

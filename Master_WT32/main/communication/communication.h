@@ -14,11 +14,10 @@
 
 typedef struct {
     uint8_t node_id;
-    uint16_t rainfall;
     uint16_t soil_moisture;
     uint8_t tilt_status;
     uint16_t battery_level;
-    uint16_t rain_count;
+    uint32_t rain_count;
     bool is_sync;
 } Packet;
 
@@ -31,12 +30,15 @@ typedef struct {
     uint8_t node_id;
     bool active;
     uint16_t last_soil_moisture;
-    uint8_t last_tilt_status;
-    uint8_t rain_count;
+    uint8_t  last_tilt_status;
+    uint32_t rain_count;
+    uint32_t last_rain_count;
     uint32_t last_rain_update_time;
     uint16_t last_battery_level;
     uint8_t missed_rounds;
     uint32_t last_time_sync;
+    int8_t ack_or_sync;
+    uint32_t last_time_ack;
 } SlaveStatus;
 void communication_task(void *pvParameters);
 void communication_init();

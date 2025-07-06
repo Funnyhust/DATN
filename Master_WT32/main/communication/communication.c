@@ -1,6 +1,8 @@
 #include "communication.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/semphr.h"
+#include "common_data.h"
 
 static const char* TAG = "Master";
 
@@ -51,16 +53,20 @@ void communication_init() {
 }
 
 void communication_task(void *pvParameters) {
+
     SlaveStatus *slaves = (SlaveStatus *)pvParameters;
     while (1) {
-        // ESP_LOGI(TAG, "Checking for LoRa packet");
+       // ESP_LOGI(TAG, "Checking for LoRa packet");
+            if (xSemaphoreTake(slaves_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                // update slaves
+
         if (lora_received()) {
             Packet pkt;
             int len = lora_receive_packet((uint8_t*)&pkt, sizeof(pkt));
             ESP_LOGI(TAG, "Received packet of length %d", len);
             if (len == sizeof(pkt) && pkt.node_id > 0 && pkt.node_id <= MAX_SLAVES) {
-                ESP_LOGI(TAG, "Received from node %d: sequence=%d, soil=%d, tilt=%d, battery=%d",
-                         pkt.node_id, pkt.rainfall, pkt.soil_moisture, pkt.tilt_status, pkt.battery_level);
+                ESP_LOGI(TAG, "Received from node %d: rain_count=%lu, soil=%d, tilt=%d, battery=%d",
+                         pkt.node_id, pkt.rain_count, pkt.soil_moisture, pkt.tilt_status, pkt.battery_level);
 
                 SlaveStatus* slave = &slaves[pkt.node_id - 1];
                 slave->node_id = pkt.node_id;
@@ -72,9 +78,11 @@ void communication_task(void *pvParameters) {
                 // Kiểm tra độ ẩm đất và gửi ACK hoặc Sync
                 if (pkt.soil_moisture < 3000) {
                     slave->active = true;// Giảm delay xuống 1 giây để test nhanh hơn
+                    slave->ack_or_sync = 0;
                     send_ack(pkt.node_id);
                 } else {
                     slave->last_time_sync = esp_timer_get_time()/1000;
+                    slave->ack_or_sync =1;
                     if(!pkt.is_sync){
                     vTaskDelay(pdMS_TO_TICKS(1500));
                     slave->active = true; // Giảm delay xuống 1 giây để test nhanh hơn
@@ -87,6 +95,8 @@ void communication_task(void *pvParameters) {
                 lora_receive(); // Đặt lại chế độ nhận nếu gói tin không hợp lệ
             }
         } 
+                    xSemaphoreGive(slaves_mutex);
+            }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

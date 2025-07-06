@@ -10,6 +10,7 @@
 #include "sensor/soil_moisture.h"
 #include "sensor/sw520.h"
 #include "sensor/battery.h"
+#include "sensor/pulse_counter.h"
 #include "driver/adc.h"
 #include "communication/communication.h"
 #include "lora/lora.h"
@@ -24,6 +25,7 @@
 #define TILT_PIN2 15
 #define TILT_PIN3 23
 #define TILT_PIN4 22
+#define RAIN_PULSE 27
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_4
 uint32_t last_time_send=0;
 
@@ -33,7 +35,6 @@ static const char* TAG = "NodeSensor";
 
 static soil_moisture_sensor_t soil_moisture;
 
-uint16_t rainfall = 0; // Placeholder for rainfall data, if needed
 
 static void read_sensors(Packet* pkt) {
     int adc_val;
@@ -54,6 +55,9 @@ static void read_sensors(Packet* pkt) {
         pkt->battery_level = 0;
        // ESP_LOGE(TAG, "Failed to read battery voltage");
     }
+    pkt->rain_count= pulse_counter_get_total_count();
+    pulse_counter_reset();
+
 }
 
 void app_main(void) {
@@ -66,13 +70,13 @@ void app_main(void) {
         return;
     }
     tilt_sensor_init(TILT_PIN1, TILT_PIN2, TILT_PIN3, TILT_PIN4);
-
+    pulse_counter_init(RAIN_PULSE);
     esp_sleep_enable_timer_wakeup(SLEEP_24H_US);
 
     while (1) {
         Packet pkt = {
-            .node_id = NODE_ID,
-            .is_sync =false,
+        .node_id = NODE_ID,
+        .is_sync =false,
         };
         read_sensors(&pkt);
 
@@ -132,10 +136,6 @@ void app_main(void) {
          }
          vTaskDelay(10);
         }
-     
-         Packet pkt = {
-            .node_id = NODE_ID,
-        };
 
         }
      }

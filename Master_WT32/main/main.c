@@ -9,9 +9,10 @@
 #include "esp_timer.h"
 #include "communication/communication.h"
 #include "warning/warning.h"
+#include "common_data.h"
+#include "freertos/semphr.h"
 
 #define SYNC_ID 0xFF
-#define MAX_SLAVES 3
 #define MAX_ROUNDS 100
 #define SYNC_INTERVAL_MS 5000
 #define BATTERY_MIN_MV 1650
@@ -20,68 +21,72 @@
 #define LCD_COLS 16
 #define LCD_ROWS 4
 #define I2C_PORT I2C_NUM_0
-#define SDA_PIN 46
-#define SCL_PIN 2
+#define SDA_PIN 18
+#define SCL_PIN 19
 
 static const char* TAG = "Master";
 
-static SlaveStatus slaves[MAX_SLAVES] = {0};
+SlaveStatus slaves[MAX_SLAVES] = {0};
 static uint8_t warning_level = 0;
 static SemaphoreHandle_t warning_level_mutex = NULL; 
+SemaphoreHandle_t slaves_mutex = NULL;
 static esp32_lcd_i2c_t lcd;
 float battery_percent;
 
 // Task xử lý dữ liệu từ các slave
-static void data_processing_task(void *pvParameters) {
+static void data_processing_task(void *pvParameters){
     ESP_LOGI(TAG, "Khoi tao task xu ly du lieu");
     while (1) {
         int warning_count = 0;
-        // Kiểm tra tất cả các node trong một vòng lặp
+        int thong_bao =0;
         for (int i = 0; i < MAX_SLAVES; i++) {
+            if (xSemaphoreTake(slaves_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                // update slaves
             // Kiểm tra trạng thái đồng bộ
-            if ((esp_timer_get_time() / 1000 - slaves[i].last_time_sync) > 45000) {
-                slaves[i].active = false;
-            }
-            // Chỉ xử lý node đang hoạt động để tính độ ẩm và pin
-            if (slaves[i].active) {
-                float battery_percent = ((slaves[i].last_battery_level - BATTERY_MIN_MV) / (float)(BATTERY_MAX_MV - BATTERY_MIN_MV)) * 100.0;
-                battery_percent = battery_percent < 0 ? 0 : (battery_percent > 100 ? 100 : battery_percent);
-
-                // Kiểm tra điều kiện cảnh báo
-                if ((slaves[i].last_tilt_status == 1 || !slaves[i].active)) {
-                    warning_count++;
-                }
-            } else {
-                // Nếu node không hoạt động, vẫn kiểm tra điều kiện cảnh báo
-                float battery_percent = ((slaves[i].last_battery_level - BATTERY_MIN_MV) / (float)(BATTERY_MAX_MV - BATTERY_MIN_MV)) * 100.0;
-                battery_percent = battery_percent < 0 ? 0 : (battery_percent > 100 ? 100 : battery_percent);
-                if (!slaves[i].active) {
-                    warning_count++;
-                }
-            }
-          if (slaves[i].rain_count != slaves[i].last_rain_count) {
-             slaves[i].last_rain_update_time = esp_timer_get_time();
-             slaves[i].last_rain_count = slaves[i].rain_count;
-            } else {    
-    // nếu không thay đổi 3 ngày
                 if ((esp_timer_get_time() - slaves[i].last_rain_update_time) > (int64_t)(3LL * 24 * 60 * 60 * 1000000)) {
                 slaves[i].rain_count = 0;
                 ESP_LOGI(TAG, "Slave %d reset rain_count ve 0 do 3 ngay khong co mua moi", i+1);
                 slaves[i].last_rain_count = 0;
-                slaves[i].last_rain_update_time = esp_timer_get_time(); // đặt lại mốc
-    }
-}
-        }
-
+                slaves[i].last_rain_update_time = esp_timer_get_time(); 
+                }
+            if(slaves[i].ack_or_sync==-1){
+                ESP_LOGI(TAG, "Test 0 %d",i);
+                warning_count++;
+            }
+            if(slaves[i].ack_or_sync==0){
+                if(esp_timer_get_time() / 1000 - slaves[i].last_time_ack > 3600000) slaves[i].active=false;
+                if(slaves[i].last_tilt_status) thong_bao++;
+            }
+            else if(slaves[i].ack_or_sync==1){
+            if ((esp_timer_get_time() / 1000 - slaves[i].last_time_sync) > 45000) {
+                ESP_LOGI(TAG, "Test 1 %d",i);
+                slaves[i].active = false;
+                warning_count++;
+            }   
+                if(slaves[i].active){
+                if ((slaves[i].last_tilt_status)) {
+                    ESP_LOGI(TAG, "Test 2 %d",i);
+                    warning_count++;
+                }
+            }
+            }
+           ESP_LOGI(TAG, "ACACAC %d =%d",i, slaves[i].ack_or_sync); 
+                    xSemaphoreGive(slaves_mutex);
+            }
+        }   
         // Cập nhật warning_level
         if (xSemaphoreTake(warning_level_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-            warning_level = (warning_count >= 3) ? 3 : (warning_count >= 2) ? 2 : (warning_count == 1) ? 1 : 0;
+            warning_level = warning_count;
+       //     warning_level = (warning_count >= 3) ? 3 : (warning_count >= 2) ? 2 : (warning_count == 1) ? 1 : 0;
             xSemaphoreGive(warning_level_mutex);
         }
 
         // In thông báo nếu có cảnh báo
-        if (warning_level > 0) {
+        if (warning_level) {
             ESP_LOGW(TAG, "Muc canh bao %d: %d node co van de", warning_level, warning_count);
+        }
+        if(thong_bao){
+            ESP_LOGW(TAG, "Thong bao %d: %d node co van de",thong_bao,thong_bao);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -114,11 +119,11 @@ static void lcd_display_task(void *pvParameters) {
                  slaves[0].active ? 1 : 0,
                  slaves[1].active ? 1 : 0,
                  slaves[2].active ? 1 : 0);
-        esp32_lcd_i2c_set_cursor(&lcd, 0, 2);
+        esp32_lcd_i2c_set_cursor(&lcd, -4, 2);
         esp32_lcd_i2c_print(&lcd, lcd_buffer);
 
         snprintf(lcd_buffer, sizeof(lcd_buffer), "Canh bao muc:%1d", warning_level);
-        esp32_lcd_i2c_set_cursor(&lcd, 0, 3);
+        esp32_lcd_i2c_set_cursor(&lcd, -4, 3);
         esp32_lcd_i2c_print(&lcd, lcd_buffer);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -129,6 +134,8 @@ static void lcd_display_task(void *pvParameters) {
 void app_main(void) {
     ESP_LOGI(TAG, "Master dang khoi dong");
         warning_level_mutex = xSemaphoreCreateMutex();
+        slaves_mutex = xSemaphoreCreateMutex();
+
 
     // Khởi tạo LoRa
     ESP_LOGI(TAG, "Khoi tao task giao tiep LoRa");
@@ -150,12 +157,13 @@ void app_main(void) {
     // Khởi tạo mảng slaves
     for (int i = 0; i < MAX_SLAVES; i++) {
         slaves[i].node_id = i + 1;
+        slaves[i].ack_or_sync=-1;
     }
     // Tạo các tác vụ
     xTaskCreate(communication_task, "CommTask", 8192, slaves, 5, NULL);
     xTaskCreate(data_processing_task, "DataTask", 8192, NULL, 5, NULL);
     xTaskCreate(lcd_display_task, "LcdTask", 8192, NULL, 4, NULL);
-    xTaskCreate(warning_task, "WarningTask", 4096, NULL, 4, NULL);
+    xTaskCreate(warning_task, "WarningTask", 4096, &warning_level, 4, NULL);
 
     while (1) {
     //     ESP_LOGI(TAG, "Vong lap chinh app_main");
@@ -165,64 +173,64 @@ void app_main(void) {
 
 // */
 
-#include <stdio.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <esp_log.h>
-#include "test/pulse_counter.h"
-#include "lcd/lcd.h"
+// #include <stdio.h>
+// #include <freertos/FreeRTOS.h>
+// #include <freertos/task.h>
+// #include <esp_log.h>
+// #include "test/pulse_counter.h"
+// #include "lcd/lcd.h"
 
-#define LCD_ADDR 0x27
-#define LCD_COLS 16
-#define LCD_ROWS 2
-#define I2C_PORT I2C_NUM_0
-#define SDA_PIN 46
-#define SCL_PIN 2
+// #define LCD_ADDR 0x27
+// #define LCD_COLS 16
+// #define LCD_ROWS 2
+// #define I2C_PORT I2C_NUM_0
+// #define SDA_PIN 46
+// #define SCL_PIN 2
 
 
-static const char *TAG = "MAIN";
+// static const char *TAG = "MAIN";
 
-// Task để hiển thị tổng số xung lên LCD
-void displayTask(void *pvParameters) {
-    esp32_lcd_i2c_t lcd;
-    ESP_LOGI(TAG, "Initializing LCD with addr 0x%02x, SDA %d, SCL %d", LCD_ADDR, SDA_PIN, SCL_PIN);
-    esp_err_t ret = esp32_lcd_i2c_init(&lcd, LCD_ADDR, LCD_COLS, LCD_ROWS, I2C_PORT, SDA_PIN, SCL_PIN);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "LCD init failed: %s", esp_err_to_name(ret));
-        vTaskDelete(NULL);
-    }
-    ESP_LOGI(TAG, "LCD initialized successfully");
+// // Task để hiển thị tổng số xung lên LCD
+// void displayTask(void *pvParameters) {
+//     esp32_lcd_i2c_t lcd;
+//     ESP_LOGI(TAG, "Initializing LCD with addr 0x%02x, SDA %d, SCL %d", LCD_ADDR, SDA_PIN, SCL_PIN);
+//     esp_err_t ret = esp32_lcd_i2c_init(&lcd, LCD_ADDR, LCD_COLS, LCD_ROWS, I2C_PORT, SDA_PIN, SCL_PIN);
+//     if (ret != ESP_OK) {
+//         ESP_LOGE(TAG, "LCD init failed: %s", esp_err_to_name(ret));
+//         vTaskDelete(NULL);
+//     }
+//     ESP_LOGI(TAG, "LCD initialized successfully");
 
-    esp32_lcd_i2c_clear(&lcd);
-    esp32_lcd_i2c_backlight_on(&lcd);
-    esp32_lcd_i2c_print(&lcd, "Pulse Counter");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    esp32_lcd_i2c_clear(&lcd);
+//     esp32_lcd_i2c_clear(&lcd);
+//     esp32_lcd_i2c_backlight_on(&lcd);
+//     esp32_lcd_i2c_print(&lcd, "Pulse Counter");
+//     vTaskDelay(pdMS_TO_TICKS(2000));
+//     esp32_lcd_i2c_clear(&lcd);
 
-    pulse_counter_init(GPIO_NUM_12);
+//     pulse_counter_init(GPIO_NUM_12);
 
-    char buffer[16];
+//     char buffer[16];
 
-    while (1) {
-        // Hiển thị tổng số xung
-        uint32_t totalCount = pulse_counter_get_total_count();
-        snprintf(buffer, sizeof(buffer), "Total: %lu", totalCount);
-        esp32_lcd_i2c_set_cursor(&lcd, 0, 0);
-        esp32_lcd_i2c_print(&lcd, buffer);
-        ESP_LOGI(TAG, "Displayed: %s", buffer);
+//     while (1) {
+//         // Hiển thị tổng số xung
+//         uint32_t totalCount = pulse_counter_get_total_count();
+//         snprintf(buffer, sizeof(buffer), "Total: %lu", totalCount);
+//         esp32_lcd_i2c_set_cursor(&lcd, 0, 0);
+//         esp32_lcd_i2c_print(&lcd, buffer);
+//         ESP_LOGI(TAG, "Displayed: %s", buffer);
 
-        vTaskDelay(pdMS_TO_TICKS(100)); // Cập nhật mỗi 100ms
-    }
-}
+//         vTaskDelay(pdMS_TO_TICKS(100)); // Cập nhật mỗi 100ms
+//     }
+// }
 
-void app_main(void) {
-    ESP_LOGI(TAG, "System started");
-    xTaskCreate(displayTask, "display_task", 4096, NULL, 5, NULL);
+// void app_main(void) {
+//     ESP_LOGI(TAG, "System started");
+//     xTaskCreate(displayTask, "display_task", 4096, NULL, 5, NULL);
 
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(10000));
-    }
-}
+//     while (1) {
+//         vTaskDelay(pdMS_TO_TICKS(10000));
+//     }
+// }
 
 // #include <stdio.h>
 // #include <freertos/FreeRTOS.h>
