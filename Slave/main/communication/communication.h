@@ -6,7 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define NODE_ID 2
+#define NODE_ID 3
 #define SYNC_ID 0xFF
 #define MAX_BROADCAST_COUNT 100
 #define SYNC_INTERVAL_MS 5000

@@ -1,17 +1,24 @@
 //         1h31 6/7/2025
 #include <stdio.h>
 #include <string.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_log.h"
-#include "lora/lora.h"
-#include "lcd/lcd.h"
-#include "esp_timer.h"
-#include "communication/communication.h"
-#include "warning/warning.h"
-#include "common_data.h"
 #include "freertos/semphr.h"
 
+#include "esp_log.h"
+#include "esp_timer.h"
+
+#include "lora/lora.h"
+#include "lcd/lcd.h"
+#include "communication/communication.h"
+#include "play_audio/play_audio.h"
+
+// 💡 Đặt rgb_led.h TRƯỚC warning.h vì warning.h cần RGB_LED
+#include "rgb_led/rgb_led.h"
+#include "warning/warning.h"
+
+#include "common_data.h"  // Thường không phụ thuộc vào các header khác
 #define SYNC_ID 0xFF
 #define MAX_ROUNDS 100
 #define SYNC_INTERVAL_MS 5000
@@ -24,8 +31,11 @@
 #define SDA_PIN 18
 #define SCL_PIN 19
 
+
 static const char* TAG = "Master";
 
+
+RGB_LED led;
 SlaveStatus slaves[MAX_SLAVES] = {0};
 static uint8_t warning_level = 0;
 static SemaphoreHandle_t warning_level_mutex = NULL; 
@@ -50,7 +60,7 @@ static void data_processing_task(void *pvParameters){
                 slaves[i].last_rain_update_time = esp_timer_get_time(); 
                 }
             if(slaves[i].ack_or_sync==-1){
-                ESP_LOGI(TAG, "Test 0 %d",i);
+             //   ESP_LOGI(TAG, "Test 0 %d",i);
                 warning_count++;
             }
             if(slaves[i].ack_or_sync==0){
@@ -59,25 +69,25 @@ static void data_processing_task(void *pvParameters){
             }
             else if(slaves[i].ack_or_sync==1){
             if ((esp_timer_get_time() / 1000 - slaves[i].last_time_sync) > 45000) {
-                ESP_LOGI(TAG, "Test 1 %d",i);
+              //  ESP_LOGI(TAG, "Test 1 %d",i);
                 slaves[i].active = false;
                 warning_count++;
             }   
                 if(slaves[i].active){
                 if ((slaves[i].last_tilt_status)) {
-                    ESP_LOGI(TAG, "Test 2 %d",i);
+                //    ESP_LOGI(TAG, "Test 2 %d",i);
                     warning_count++;
                 }
             }
             }
-           ESP_LOGI(TAG, "ACACAC %d =%d",i, slaves[i].ack_or_sync); 
+     //      ESP_LOGI(TAG, "ACACAC %d =%d",i, slaves[i].ack_or_sync); 
                     xSemaphoreGive(slaves_mutex);
             }
         }   
         // Cập nhật warning_level
         if (xSemaphoreTake(warning_level_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-            warning_level = warning_count;
-       //     warning_level = (warning_count >= 3) ? 3 : (warning_count >= 2) ? 2 : (warning_count == 1) ? 1 : 0;
+        //   warning_level = warning_count;
+           warning_level = (warning_count >= 3) ? 3 : (warning_count >= 2) ? 2 : (warning_count == 1) ? 1 : 0;
             xSemaphoreGive(warning_level_mutex);
         }
 
@@ -88,7 +98,7 @@ static void data_processing_task(void *pvParameters){
         if(thong_bao){
             ESP_LOGW(TAG, "Thong bao %d: %d node co van de",thong_bao,thong_bao);
         }
-
+        
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -97,8 +107,9 @@ static void data_processing_task(void *pvParameters){
 static void lcd_display_task(void *pvParameters) {
     ESP_LOGI(TAG, "Khoi tao task hien thi LCD");
     char lcd_buffer[17];
-
+    uint32_t now=esp_timer_get_time()/1000;
     while (1) {
+        //LCD display
         esp32_lcd_i2c_clear(&lcd);
 
         snprintf(lcd_buffer, sizeof(lcd_buffer), "Humi:%3.0f %3.0f %3.0f",
@@ -125,13 +136,39 @@ static void lcd_display_task(void *pvParameters) {
         snprintf(lcd_buffer, sizeof(lcd_buffer), "Canh bao muc:%1d", warning_level);
         esp32_lcd_i2c_set_cursor(&lcd, -4, 3);
         esp32_lcd_i2c_print(&lcd, lcd_buffer);
-
+        //LOG
+        if(esp_timer_get_time()/1000-now > 10000){
+        ESP_LOGI(TAG, "------------------------------");
+        ESP_LOGI(TAG, "Trang thai cac tram giam sat:");
+        for (int i = 0; i < MAX_SLAVES; i++) {
+            ESP_LOGI(TAG, "Slave %d:", i + 1);
+            ESP_LOGI(TAG, "  active: %s", slaves[i].active ? "YES" : "NO");
+            ESP_LOGI(TAG, "  ack_or_sync: %d", slaves[i].ack_or_sync);
+            ESP_LOGI(TAG, "  last_tilt_status: %d", slaves[i].last_tilt_status);
+            ESP_LOGI(TAG, "  last_soil_moisture: %d (%.1f%%)", 
+                     slaves[i].last_soil_moisture,
+                     (slaves[i].last_soil_moisture / 4095.0) * 100.0);
+            ESP_LOGI(TAG, "  last_battery_mv: %d (%.1f%%)", 
+                     slaves[i].last_battery_level,
+                     ((float)(slaves[i].last_battery_level - BATTERY_MIN_MV) / (BATTERY_MAX_MV - BATTERY_MIN_MV)) * 100.0);
+            ESP_LOGI(TAG, "  rain_count: %lu", slaves[i].rain_count);
+            ESP_LOGI(TAG, "  last_time_ack (s): %lu", slaves[i].last_time_ack / 1000);
+            ESP_LOGI(TAG, "  last_time_sync (s): %lu", slaves[i].last_time_sync / 1000);
+            now=esp_timer_get_time();
+        }
+        ESP_LOGI(TAG, "------------------------------");
+    }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
 
 void app_main(void) {
+
+    warning_param_t param = {
+        .warning_level = &warning_level,
+        .led = &led
+    };
     ESP_LOGI(TAG, "Master dang khoi dong");
         warning_level_mutex = xSemaphoreCreateMutex();
         slaves_mutex = xSemaphoreCreateMutex();
@@ -153,17 +190,21 @@ void app_main(void) {
         vTaskDelay(pdMS_TO_TICKS(2000));
         esp32_lcd_i2c_clear(&lcd);
     }
+    play_audio_init();
+    mount_spiffs();
 
     // Khởi tạo mảng slaves
     for (int i = 0; i < MAX_SLAVES; i++) {
         slaves[i].node_id = i + 1;
         slaves[i].ack_or_sync=-1;
     }
+    rgb_led_init(&led, 33, 32, 27);
     // Tạo các tác vụ
     xTaskCreate(communication_task, "CommTask", 8192, slaves, 5, NULL);
     xTaskCreate(data_processing_task, "DataTask", 8192, NULL, 5, NULL);
     xTaskCreate(lcd_display_task, "LcdTask", 8192, NULL, 4, NULL);
-    xTaskCreate(warning_task, "WarningTask", 4096, &warning_level, 4, NULL);
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    xTaskCreate(warning_task, "WarningTask", 4096, &param, 4, NULL);
 
     while (1) {
     //     ESP_LOGI(TAG, "Vong lap chinh app_main");

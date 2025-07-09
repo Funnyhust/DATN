@@ -81,11 +81,11 @@ void communication_task(void *pvParameters) {
                     slave->ack_or_sync = 0;
                     send_ack(pkt.node_id);
                 } else {
+                    slave->active = true; // Giảm delay xuống 1 giây để test nhanh hơn
                     slave->last_time_sync = esp_timer_get_time()/1000;
                     slave->ack_or_sync =1;
                     if(!pkt.is_sync){
                     vTaskDelay(pdMS_TO_TICKS(1500));
-                    slave->active = true; // Giảm delay xuống 1 giây để test nhanh hơn
                     send_sync(pkt.node_id,slaves);
                 }
                 }

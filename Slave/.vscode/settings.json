@@ -5,6 +5,7 @@
         "stdint.h": "c",
         "soil_moisture.h": "c",
         "communication.h": "c",
-        "pulse_counter.h": "c"
+        "pulse_counter.h": "c",
+        "lora.h": "c"
     }
 }
