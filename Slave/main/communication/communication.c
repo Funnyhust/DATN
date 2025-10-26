@@ -14,10 +14,10 @@ void communication_init(uint8_t node_id) {
         lora_set_bandwidth(125E3);
         lora_set_coding_rate(5);
         lora_enable_crc();
-        lora_set_preamble_length(12);
+        lora_set_preamble_length(9);
         lora_set_sync_word(0x34);
         lora_set_tx_power(20);
-        lora_receive();
+        //lora_receive();
     }
 }
 
